@@ -1,98 +1,76 @@
 import java.time.LocalDate;
-import java.util.HashMap;
-import java.util.Map;
-
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Component
 public class LibraryService {
-    private static final int MAX_BOOKS = 100;
-    private static final int MAX_BOOKS_PER_AUTHOR = 10;
-    private static final int MIN_RELEASE_YEAR = 800;
+    private static final Logger logger = LoggerFactory.getLogger(LibraryService.class);
 
-    private BookDao bookDao;
-    private int bookCounter = 0;
-    private Map<String, Integer> authorBookCount = new HashMap<>();
+    private final BookDao bookDao;
+    private int bookCounter;
 
-    public LibraryService() {
-        this.bookDao = new BookFileDao();
+    @Value("${library.maxBooks}")
+    private int maxBooks;
+
+    @Value("${library.maxBooksPerAuthor}")
+    private int maxBooksPerAuthor;
+
+    @Value("${library.minYear}")
+    private int minYear;
+
+    public LibraryService(BookDao bookDao) {
+        this.bookDao = bookDao;
         this.bookCounter = bookDao.getAll().size();
-        initializeAuthorBookCount();
     }
 
-    private void initializeAuthorBookCount() {
-        for (EBook book : bookDao.getAll()) {
-            authorBookCount.put(book.getAuthor(), 
-                authorBookCount.getOrDefault(book.getAuthor(), 0) + 1);
-        }
-    }
+    public void addBook(String author, LocalDate releaseDate, String name, String link) {
+        logger.info("Adding a book: {}", name);
 
-    public void addBook(String author, LocalDate releaseDate, String name, String link) throws IllegalArgumentException {
-        if (bookDao.getAll().size() >= MAX_BOOKS) {
-            throw new IllegalArgumentException("Maximum number of books (100) reached.");
+        long authorBookCount = bookDao.getAll().stream()
+                                      .filter(book -> book.getAuthor().equals(author))
+                                      .count();
+        if (authorBookCount >= maxBooksPerAuthor) {
+            throw new IllegalStateException("Author " + author + " cannot have more than " + maxBooksPerAuthor + " books.");
         }
-        if (authorBookCount.getOrDefault(author, 0) >= MAX_BOOKS_PER_AUTHOR) {
-            throw new IllegalArgumentException("Maximum books by this author (10) reached.");
+        if (bookCounter >= maxBooks) {
+            throw new IllegalStateException("Cannot add more than " + maxBooks + " books.");
         }
-        if (releaseDate.getYear() < MIN_RELEASE_YEAR) {
-            throw new IllegalArgumentException("Release year must be at least " + MIN_RELEASE_YEAR + ".");
-        }
-        if (bookDao.getAll().stream().anyMatch(b -> b.getName().equals(name))) {
-            throw new IllegalArgumentException("A book with this name already exists.");
+        if (releaseDate.getYear() < minYear) {
+            throw new IllegalArgumentException("Book year cannot be less than " + minYear);
         }
 
         EBook book = new EBook(author, releaseDate, name, link);
         book.setID(bookCounter++);
-        bookDao.save(book);
-        authorBookCount.put(author, authorBookCount.getOrDefault(author, 0) + 1);
+        try {
+            bookDao.save(book);
+            logger.info("Successfully added book: {}", name);
+        } catch (Exception e) {
+            logger.error("Failed to add book: {}", name, e);
+            throw new RuntimeException("Failed to save the book.", e);
+        }
     }
 
-    public void editBook(int id, String author, LocalDate releaseDate, String name, String link) throws IllegalArgumentException {
-        if (releaseDate.getYear() < MIN_RELEASE_YEAR) {
-            throw new IllegalArgumentException("Release year must be at least " + MIN_RELEASE_YEAR + ".");
-        }
-
-        EBook existingBook = bookDao.get(id);
-        if (existingBook == null) {
+    public void editBook(int id, String author, LocalDate releaseDate, String name, String link) {
+        if (!bookDao.exists(id)) {
             throw new IllegalArgumentException("Book with ID " + id + " does not exist.");
         }
-
-        // Update author book count if the author is being changed
-        if (!existingBook.getAuthor().equals(author)) {
-            if (authorBookCount.getOrDefault(author, 0) >= MAX_BOOKS_PER_AUTHOR) {
-                throw new IllegalArgumentException("Maximum books by this author (10) reached.");
-            }
-            authorBookCount.put(existingBook.getAuthor(), authorBookCount.get(existingBook.getAuthor()) - 1);
-            authorBookCount.put(author, authorBookCount.getOrDefault(author, 0) + 1);
-        }
-
         EBook book = new EBook(author, releaseDate, name, link);
         book.setID(id);
         bookDao.update(book);
+        logger.info("Edited book with ID: {}", id);
     }
 
-    public void deleteBook(int id) throws IllegalArgumentException {
-        EBook book = bookDao.get(id);
-        if (book == null) {
+    public void deleteBook(int id) {
+        if (!bookDao.exists(id)) {
             throw new IllegalArgumentException("Book with ID " + id + " does not exist.");
         }
         bookDao.delete(id);
-        authorBookCount.put(book.getAuthor(), authorBookCount.get(book.getAuthor()) - 1);
-    }
-
-    public EBook getBook(int id) throws IllegalArgumentException {
-        EBook book = bookDao.get(id);
-        if (book == null) {
-            throw new IllegalArgumentException("Book with ID " + id + " does not exist.");
-        }
-        return book;
+        logger.info("Deleted book with ID: {}", id);
     }
 
     public String showBooks() {
         StringBuilder output = new StringBuilder();
         for (EBook book : bookDao.getAll()) {
-            output.append(book.toString()).append("\n");
-        }
-        return output.toString();
-    }
-}
+            output.append(boo
